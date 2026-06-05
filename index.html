@@ -397,6 +397,31 @@ async function callScript(payload) {
   });
 }
 
+// Split large saves into chunks to avoid URL length limits
+async function callScriptChunked(payload) {
+  // Always send week data first
+  const weekPayload = { action: payload.action, week: payload.week };
+  await callScript(weekPayload);
+
+  // Send at-risk in chunks of 20
+  if (payload.atRisk && payload.atRisk.length) {
+    const chunkSize = 20;
+    for (let i = 0; i < payload.atRisk.length; i += chunkSize) {
+      await callScript({ action: 'saveAtRiskChunk', atRisk: payload.atRisk.slice(i, i + chunkSize), isFirst: i === 0 });
+    }
+  }
+
+  // Send cancellations in chunks of 15
+  if (payload.cancellations && payload.cancellations.length) {
+    const chunkSize = 15;
+    for (let i = 0; i < payload.cancellations.length; i += chunkSize) {
+      await callScript({ action: 'saveCancellationsChunk', cancellations: payload.cancellations.slice(i, i + chunkSize) });
+    }
+  }
+
+  return { success: true };
+}
+
 async function refreshData() {
   document.getElementById('last-updated').textContent = 'Loading...';
   try {
@@ -1198,7 +1223,7 @@ async function saveWeek() {
   saveLocal(); renderAll();
   okEl.textContent='Saving to Google Sheet...'; okEl.style.display='block';
   try {
-    await callScript({action:'saveWeek',week:weekEntry,atRisk:parsedRisk||[],cancellations:parsedCancels||[]});
+    await callScriptChunked({action:'saveWeek',week:weekEntry,atRisk:parsedRisk||[],cancellations:parsedCancels||[]});
     okEl.textContent='✓ Saved to Google Sheet successfully.';
     document.getElementById('inp-active').value='';
     document.getElementById('inp-new').value='';
