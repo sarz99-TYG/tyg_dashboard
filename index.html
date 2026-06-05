@@ -103,6 +103,17 @@ textarea:focus{border-color:var(--blue);}
 .days-soon{background:var(--red-bg);color:var(--red-text);}
 .days-mid{background:var(--amber-bg);color:var(--amber-text);}
 .days-later{background:var(--bg-2);color:var(--text-2);}
+.contact-btn{font-size:11px;padding:3px 10px;border-radius:8px;border:0.5px solid var(--blue);background:transparent;color:var(--blue);cursor:pointer;font-family:var(--font);transition:all .15s;white-space:nowrap;flex-shrink:0;}
+.contact-btn:hover{background:var(--blue);color:#fff;}
+.contact-btn.has-log{background:#E6F1FB;border-color:var(--blue);}
+.contact-entry{padding:8px 10px;background:var(--bg-2);border-radius:var(--r-md);margin-bottom:6px;font-size:12px;}
+.contact-entry:last-child{margin-bottom:0;}
+.contact-entry-header{display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap;}
+.contact-entry-date{font-weight:500;color:var(--text);}
+.contact-entry-who{color:var(--text-2);}
+.contact-outcome-badge{font-size:10px;padding:1px 7px;border-radius:8px;background:var(--green-bg);color:var(--green-text);font-weight:500;}
+.contact-entry-note{color:var(--text-2);line-height:1.5;}
+.last-contact-strip{font-size:11px;color:var(--blue);margin-top:4px;padding:4px 8px;background:#E6F1FB;border-radius:6px;display:inline-block;}
 .snooze-btn{font-size:11px;padding:3px 10px;border-radius:8px;border:0.5px solid var(--border-md);background:var(--bg-2);color:var(--text-2);cursor:pointer;font-family:var(--font);transition:all .15s;white-space:nowrap;flex-shrink:0;}
 .snooze-btn:hover{background:var(--amber-bg);color:var(--amber-text);border-color:var(--amber-text);}
 .unsnooze-btn{font-size:11px;padding:3px 10px;border-radius:8px;border:0.5px solid var(--border-md);background:var(--bg-2);color:var(--text-2);cursor:pointer;font-family:var(--font);transition:all .15s;white-space:nowrap;flex-shrink:0;}
@@ -248,6 +259,39 @@ textarea:focus{border-color:var(--blue);}
     </div>
   </div>
 
+  <!-- CONTACT LOG MODAL -->
+  <div id="contact-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:100;align-items:center;justify-content:center;">
+    <div style="background:var(--bg);border-radius:var(--r-lg);padding:1.5rem;width:100%;max-width:440px;margin:1rem;border:0.5px solid var(--border-md);max-height:90vh;overflow-y:auto;">
+      <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px;" id="contact-name-display">Log contact</div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:1.25rem;" id="contact-history-count"></div>
+
+      <!-- Previous contacts -->
+      <div id="contact-history-list" style="margin-bottom:1.25rem;display:none;">
+        <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Previous contact attempts</div>
+        <div id="contact-history-entries"></div>
+      </div>
+
+      <!-- New contact form -->
+      <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px;">Log new attempt</div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <div class="form-label">Date</div>
+        <input type="date" id="contact-date" style="margin-top:4px;">
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <div class="form-label">Who contacted them</div>
+        <input type="text" id="contact-who" placeholder="e.g. Paul, Cat, Sarah" style="margin-top:4px;">
+      </div>
+      <div class="form-group" style="margin-bottom:1.25rem;">
+        <div class="form-label">Outcome &amp; notes</div>
+        <textarea id="contact-outcome" placeholder="e.g. Called — spoke to her, said she's been travelling, back next week" style="font-family:var(--font);font-size:13px;min-height:80px;margin-top:4px;"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="confirmContact()" style="flex:1;">Save contact log</button>
+        <button class="btn secondary" onclick="closeContactModal()" style="flex:1;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CANCEL REASONS -->
   <div id="tab-cancellations" style="display:none;">
     <div class="two-col">
@@ -367,8 +411,10 @@ textarea:focus{border-color:var(--blue);}
 const URL_KEY = 'tyg_script_url';
 const SNOOZE_KEY = 'tyg_snoozed';
 const REMOVED_KEY = 'tyg_removed';
+const CONTACT_KEY = 'tyg_contacts';
 let SCRIPT_URL = localStorage.getItem(URL_KEY) || '';
-let weeks = [], atRisk = [], cancelData = [], pendingData = [], snoozedData = [], removedData = [];
+let weeks = [], atRisk = [], cancelData = [], pendingData = [], snoozedData = [], removedData = [], contactLog = [];
+let pendingContact = null;
 let pendingSnooze = null, pendingRemove = null;
 let chartActive = null, chartMovement = null, chartReasons = null;
 
@@ -376,6 +422,7 @@ async function init() {
   document.getElementById('inp-date').value = new Date().toISOString().split('T')[0];
   loadSnoozed();
   loadRemoved();
+  loadContacts();
   if (!SCRIPT_URL) {
     document.getElementById('setup-banner').style.display = 'block';
     document.getElementById('last-updated').textContent = 'Not connected';
@@ -430,11 +477,9 @@ async function refreshData() {
     atRisk = res.atRisk || [];
     cancelData = res.cancellations || [];
     pendingData = derivePending(cancelData);
-    // Merge sheet snooze/removed with local — sheet is source of truth
-    if (res.snoozed) { snoozedData = res.snoozed; saveSnoozed(); }
-    else loadSnoozed();
-    if (res.removed) { removedData = res.removed; saveRemoved(); }
-    else loadRemoved();
+    if (res.snoozed) { snoozedData = res.snoozed; saveSnoozed(); } else loadSnoozed();
+    if (res.removed) { removedData = res.removed; saveRemoved(); } else loadRemoved();
+    if (res.contacts) { contactLog = res.contacts; saveContacts(); } else loadContacts();
     renderAll();
     saveLocal();
   } catch(e) {
@@ -487,12 +532,20 @@ function saveRemoved() {
   localStorage.setItem(REMOVED_KEY, JSON.stringify(removedData));
 }
 
+function saveContacts() {
+  localStorage.setItem(CONTACT_KEY, JSON.stringify(contactLog));
+}
+
 function loadSnoozed() {
   try { const r = localStorage.getItem(SNOOZE_KEY); if(r) snoozedData = JSON.parse(r); } catch(e) { snoozedData = []; }
 }
 
 function loadRemoved() {
   try { const r = localStorage.getItem(REMOVED_KEY); if(r) removedData = JSON.parse(r); } catch(e) { removedData = []; }
+}
+
+function loadContacts() {
+  try { const r = localStorage.getItem(CONTACT_KEY); if(r) contactLog = JSON.parse(r); } catch(e) { contactLog = []; }
 }
 
 function loadLocal() {
@@ -502,6 +555,7 @@ function loadLocal() {
   } catch(e) {}
   loadSnoozed();
   loadRemoved();
+  loadContacts();
   renderAll();
 }
 
@@ -628,6 +682,11 @@ function renderAtRisk(members) {
   function row(m) {
     const avCls=m.priority==='high'?'av-r':'av-a', bCls=m.priority==='high'?'b-r':'b-a';
     const safeName = m.name.replace(/'/g,"\\'");
+    const memberContacts = contactLog.filter(c => c.memberName === m.name).sort((a,b) => b.date.localeCompare(a.date));
+    const lastContact = memberContacts[0];
+    const contactBtnCls = lastContact ? 'contact-btn has-log' : 'contact-btn';
+    const contactBtnLabel = lastContact ? `📞 ${memberContacts.length} contact${memberContacts.length!==1?'s':''}` : '📞 Log contact';
+    const lastContactHtml = lastContact ? `<div class="last-contact-strip">Last contact: ${lastContact.date} · ${lastContact.who} · ${lastContact.outcome}</div>` : '';
     return `<div class="member-row">
       <div class="avatar ${avCls}">${initials(m.name)}</div>
       <div style="flex:1;min-width:0;">
@@ -641,8 +700,10 @@ function renderAtRisk(members) {
           <span class="chip">${m.fall}%</span>
           ${m.membership?`<span class="chip">${String(m.membership).substring(0,28)}</span>`:''}
         </div>
+        ${lastContactHtml}
         <div style="display:flex;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap;">
           <div class="action-tip" style="flex:1;margin-top:0;">${m.priority==='high'?'Call directly this week.':'Message on the floor or via text.'}</div>
+          <button class="${contactBtnCls}" onclick="openContactModal('${safeName}')">${contactBtnLabel}</button>
           <button class="snooze-btn" onclick="openSnoozeModal('${safeName}')">Snooze</button>
           <button class="snooze-btn" style="color:var(--red-text);" onclick="openRemoveModal('${safeName}')">Remove</button>
         </div>
@@ -770,6 +831,70 @@ function unremove(name) {
   saveRemoved();
   syncSnoozeRemoved();
   renderAtRisk(atRisk);
+}
+
+// ── CONTACT LOG FUNCTIONS ─────────────────────────────────────────────────────
+function openContactModal(name) {
+  pendingContact = name;
+  document.getElementById('contact-name-display').textContent = '📞 ' + name;
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('contact-date').value = today;
+  document.getElementById('contact-who').value = '';
+  document.getElementById('contact-outcome').value = '';
+  document.getElementById('contact-note').value = '';
+
+  // Show previous contacts
+  const memberContacts = contactLog.filter(c => c.memberName === name).sort((a,b) => b.date.localeCompare(a.date));
+  const historyEl = document.getElementById('contact-history-list');
+  const entriesEl = document.getElementById('contact-history-entries');
+  const countEl = document.getElementById('contact-history-count');
+
+  if (memberContacts.length) {
+    countEl.textContent = `${memberContacts.length} previous contact attempt${memberContacts.length!==1?'s':''}`;
+    historyEl.style.display = 'block';
+    entriesEl.innerHTML = memberContacts.map(c => `
+      <div class="contact-entry">
+        <div class="contact-entry-header">
+          <span class="contact-entry-date">${c.date}</span>
+          <span class="contact-entry-who">${c.who}</span>
+          <span class="contact-outcome-badge">${c.outcome}</span>
+        </div>
+
+      </div>`).join('');
+  } else {
+    countEl.textContent = 'No previous contact attempts';
+    historyEl.style.display = 'none';
+  }
+
+  document.getElementById('contact-overlay').style.display = 'flex';
+}
+
+function closeContactModal() {
+  document.getElementById('contact-overlay').style.display = 'none';
+  pendingContact = null;
+}
+
+function confirmContact() {
+  if (!pendingContact) return;
+  const date = document.getElementById('contact-date').value;
+  const who = document.getElementById('contact-who').value;
+  const outcome = document.getElementById('contact-outcome').value;
+  if (!date || !who || !outcome) { alert('Please fill in all three fields.'); return; }
+  const entry = { memberName: pendingContact, date, who, outcome, note: '', loggedAt: new Date().toISOString() };
+  contactLog.push(entry);
+  saveContacts();
+  syncContactLog(entry);
+  closeContactModal();
+  renderAtRisk(atRisk);
+}
+
+async function syncContactLog(entry) {
+  if (!SCRIPT_URL) return;
+  try {
+    await callScript({ action: 'saveContact', contact: entry });
+  } catch(e) {
+    // Silent fail — saved locally
+  }
 }
 
 // Sync snooze + removed to Google Sheet in background (non-blocking)
@@ -1018,7 +1143,7 @@ function parseHealthRows(rows) {
     // Just strip the % sign and parse directly — never multiply
     const fall = parseFloat(String(row[fallIdx] || '').replace('%','').trim()) || 0;
     const mem = memIdx > -1 ? String(row[memIdx] || '').trim() : '';
-    if (avg < 3 || fall >= -30) continue;
+    if (avg < 6 || fall >= -30) continue;
     out.push({ name, avg, last30, fall: Math.round(fall), membership: mem, priority: fall <= -50 ? 'high' : 'medium' });
   }
   return out.sort((a,b) => a.fall - b.fall);
@@ -1432,12 +1557,13 @@ function changeUrl(){const url=prompt('Enter new Google Apps Script URL:',SCRIPT
 function resetUrl(){if(!confirm('Disconnect Google Sheet?')) return;SCRIPT_URL='';localStorage.removeItem(URL_KEY);document.getElementById('setup-banner').style.display='block';document.getElementById('save-btn').disabled=true;document.getElementById('last-updated').textContent='Not connected';}
 
 function clearAll(){
-  if(!confirm('Clear all saved data? This will wipe weekly numbers, at-risk members, cancellations, snoozes and removed entries. This cannot be undone.')) return;
-  weeks=[]; atRisk=[]; cancelData=[]; pendingData=[]; snoozedData=[]; removedData=[];
+  if(!confirm('Clear all saved data? This will wipe weekly numbers, at-risk members, cancellations, snoozes, removed entries and contact logs. This cannot be undone.')) return;
+  weeks=[]; atRisk=[]; cancelData=[]; pendingData=[]; snoozedData=[]; removedData=[]; contactLog=[];
   localStorage.removeItem('tyg_cache');
   localStorage.removeItem(SNOOZE_KEY);
   localStorage.removeItem(REMOVED_KEY);
-  saveSnoozed(); saveRemoved();
+  localStorage.removeItem(CONTACT_KEY);
+  saveSnoozed(); saveRemoved(); saveContacts();
   if(chartActive){chartActive.destroy();chartActive=null;}
   if(chartMovement){chartMovement.destroy();chartMovement=null;}
   if(chartProjection){chartProjection.destroy();chartProjection=null;}
