@@ -1014,20 +1014,9 @@ function parseHealthRows(rows) {
     const name = normaliseHealthName(rawName);
     const avg  = parseFloat(String(row[avgIdx]  || '').replace('%','')) || 0;
     const last30 = parseInt(String(row[last30Idx] || '')) || 0;
-    // Mindbody stores fall-off as a percentage-formatted cell
-    // SheetJS reads it as a decimal (e.g. -0.97 means -97%, -0.30 means -30%)
-    // So we always multiply by 100 to get the real percentage
-    const rawFall = parseFloat(String(row[fallIdx] || '').replace('%','')) || 0;
-    let fall;
-    if (rawFall === 0) {
-      fall = 0;
-    } else if (rawFall > -1 && rawFall < 0) {
-      // Decimal format from Excel percentage cell e.g. -0.97 = -97%
-      fall = rawFall * 100;
-    } else {
-      // Already a whole percentage e.g. -97
-      fall = rawFall;
-    }
+    // Fall-off is stored as a percentage string e.g. '-0.97%' or '-52.3%'
+    // Just strip the % sign and parse directly — never multiply
+    const fall = parseFloat(String(row[fallIdx] || '').replace('%','').trim()) || 0;
     const mem = memIdx > -1 ? String(row[memIdx] || '').trim() : '';
     if (avg < 3 || fall >= -30) continue;
     out.push({ name, avg, last30, fall: Math.round(fall), membership: mem, priority: fall <= -50 ? 'high' : 'medium' });
